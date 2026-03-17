@@ -502,6 +502,82 @@ def netbox_search_objects(
     return results
 
 
+@mcp.tool(
+    description="""
+    Get the next available prefix of a given size within a NetBox container prefix.
+
+    Args:
+        parent_prefix: CIDR notation of the container prefix (e.g. "10.0.0.0/16")
+        site: Site name or slug to narrow the search (e.g. "Bonn" or "bonn")
+        prefix_length: Desired prefix length (e.g. 26 for a /26)
+
+    Returns:
+        Dict with:
+          - next_available_prefix: CIDR of the first available subnet (e.g. "10.0.1.128/26")
+          - container: Info about the container prefix (id, prefix, site, status)
+          - available_block: The free block from which the subnet was carved
+    """,
+)
+def netbox_get_next_available_prefix(
+    parent_prefix: Annotated[str, Field(description="CIDR of the container prefix, e.g. '10.0.0.0/16'")],
+    site: Annotated[str, Field(description="Site name or slug, e.g. 'Bonn' or 'bonn'")],
+    prefix_length: Annotated[int, Field(description="Desired prefix length (1-128), e.g. 26 for /26")],
+) -> dict:
+    import ipaddress
+
+    if not (1 <= prefix_length <= 128):
+        raise ValueError(f"prefix_length must be between 1 and 128, got {prefix_length}")
+
+    # Step 1: Find the container prefix
+    response = netbox.get(
+        "ipam/prefixes",
+        params={"prefix": parent_prefix, "site": site, "status": "container", "limit": 1},
+    )
+    results = response.get("results", [])
+    if not results:
+        raise ValueError(
+            f"No container prefix found for prefix='{parent_prefix}', site='{site}'"
+        )
+    container = results[0]
+    container_id = container["id"]
+    container_network = ipaddress.ip_network(container["prefix"], strict=False)
+
+    # Step 2: Validate requested prefix length
+    if prefix_length <= container_network.prefixlen:
+        raise ValueError(
+            f"prefix_length {prefix_length} must be greater than the container's "
+            f"prefix length {container_network.prefixlen}"
+        )
+
+    # Step 3: Fetch available blocks from NetBox
+    available = netbox.get(f"ipam/prefixes/{container_id}/available-prefixes")
+    if not available:
+        raise ValueError(
+            f"No available prefixes in container '{parent_prefix}' at site '{site}'"
+        )
+
+    # Step 4: Find the first block large enough
+    for block in available:
+        block_network = ipaddress.ip_network(block["prefix"], strict=False)
+        if block_network.prefixlen <= prefix_length:
+            subnet = next(block_network.subnets(new_prefix=prefix_length))
+            return {
+                "next_available_prefix": str(subnet),
+                "container": {
+                    "id": container_id,
+                    "prefix": container["prefix"],
+                    "site": site,
+                    "status": container.get("status", {}).get("value", "container"),
+                },
+                "available_block": block["prefix"],
+            }
+
+    raise ValueError(
+        f"No available block large enough for /{prefix_length} in container "
+        f"'{parent_prefix}' at site '{site}'"
+    )
+
+
 def _get_endpoint_info(object_type: str) -> tuple[str, str | None]:
     """
     Returns (endpoint, fallback_endpoint) for the given object type.
