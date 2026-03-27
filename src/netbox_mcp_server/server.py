@@ -191,12 +191,11 @@ def validate_filters(filters: dict) -> None:
         if len(parts) == 2 and parts[-1] in valid_suffixes:
             continue
         # Block multi-hop patterns and invalid suffixes
-        if len(parts) >= 2:
-            raise ValueError(
-                f"Invalid filter '{filter_name}': Multi-hop relationship "
-                f"traversal or invalid lookup suffix not supported. Use direct field filters like "
-                f"'site_id' or two-step queries."
-            )
+        raise ValueError(
+            f"Invalid filter '{filter_name}': Multi-hop relationship "
+            f"traversal or invalid lookup suffix not supported. Use direct field filters like "
+            f"'site_id' or two-step queries."
+        )
 
 
 @mcp.tool(
@@ -431,8 +430,11 @@ def netbox_get_changelogs(filters: dict):
     """
     endpoint = "core/object-changes"
 
-    # Make API call
-    return netbox.get(endpoint, params=filters)
+    # Apply default limit if not set by caller
+    params = filters.copy()
+    params.setdefault("limit", 50)
+
+    return netbox.get(endpoint, params=params)
 
 
 @mcp.tool(
@@ -512,13 +514,12 @@ def netbox_search_objects(
     for obj_type in search_types:
         try:
             endpoint, fallback = _get_endpoint_info(obj_type)
+            params: dict[str, Any] = {"q": query, "limit": limit}
+            if fields:
+                params["fields"] = ",".join(fields)
             response = netbox.get(
                 endpoint,
-                params={
-                    "q": query,
-                    "limit": limit,
-                    "fields": ",".join(fields) if fields else None,
-                },
+                params=params,
                 fallback_endpoint=fallback,
             )
             # Extract results array from paginated response
@@ -756,10 +757,15 @@ def netbox_get_vlans_for_site(
         },
     )
 
+    total = vlan_response.get("count", 0)
+    results = vlan_response.get("results", [])
+    truncated = total > len(results)
+
     return {
-        "count": vlan_response.get("count", 0),
+        "count": total,
         "vlan_group": {"id": vlan_group["id"], "name": vlan_group["name"]},
-        "results": vlan_response.get("results", []),
+        "results": results,
+        **({"warning": f"Results truncated: {len(results)} of {total} VLANs returned. Use netbox_get_objects with offset for full pagination."} if truncated else {}),
     }
 
 
@@ -777,7 +783,7 @@ def netbox_get_vlans_for_site(
             - vlan: The matching VLAN object if found, null otherwise
     """,
 )
-def netbox_check_vlan_id_in_group(
+def netbox_check_vlan_id_in_vlan_group(
     vlan_group_id: Annotated[int, Field(description="Numeric ID of the VLAN group")],
     vid: Annotated[int, Field(description="VLAN ID to check (1-4094)", ge=1, le=4094)],
 ) -> dict:
@@ -1099,13 +1105,33 @@ def netbox_create_vlan_prefix_batch(
     errors = []
 
     for entry in entries:
-        vlan_id = entry["vlan_id"]
-        prefix_cidr = entry["prefix"]
-        role = entry["role"]
-        description = entry.get("description", "")
-        vlan_name = entry.get("vlan_name") or f"VLAN-{vlan_id}"
-
         try:
+            vlan_id = entry["vlan_id"]
+            prefix_cidr = entry["prefix"]
+            role = entry["role"]
+            description = entry.get("description", "")
+            vlan_name = entry.get("vlan_name") or f"VLAN-{vlan_id}"
+
+            # Validate role
+            if role not in VALID_IPAM_ROLES:
+                errors.append({
+                    "vlan_id": vlan_id,
+                    "prefix": prefix_cidr,
+                    "error": f"Invalid role '{role}'. Must be one of: {', '.join(sorted(VALID_IPAM_ROLES))}",
+                })
+                continue
+
+            # Validate production VLAN range
+            if role == "production":
+                lo, hi = PRODUCTION_VLAN_RANGE
+                if not (lo <= vlan_id <= hi):
+                    errors.append({
+                        "vlan_id": vlan_id,
+                        "prefix": prefix_cidr,
+                        "error": f"Production VLANs require VLAN ID between {lo} and {hi}, got {vlan_id}",
+                    })
+                    continue
+
             # Step 4: Check if VLAN already exists
             existing_resp = netbox.get(
                 "ipam/vlans",
@@ -1128,13 +1154,12 @@ def netbox_create_vlan_prefix_batch(
                         }
                     )
                     continue
-                # Overwrite: update description on existing VLAN
+                # Overwrite: update name and description on existing VLAN
                 existing_vlan_id = existing_vlans[0]["id"]
-                netbox.update(
-                    "ipam/vlans", existing_vlan_id, {"description": description}
+                updated_vlan = netbox.update(
+                    "ipam/vlans", existing_vlan_id, {"name": vlan_name, "description": description}
                 )
-                created_vlan = existing_vlans[0]
-                created_vlan["id"] = existing_vlan_id
+                created_vlan = updated_vlan
             else:
                 # Create new VLAN
                 vlan_payload: dict[str, Any] = {
@@ -1181,8 +1206,8 @@ def netbox_create_vlan_prefix_batch(
         except Exception as e:
             errors.append(
                 {
-                    "vlan_id": vlan_id,
-                    "prefix": prefix_cidr,
+                    "vlan_id": entry.get("vlan_id"),
+                    "prefix": entry.get("prefix"),
                     "error": str(e),
                 }
             )
