@@ -98,6 +98,13 @@ def parse_cli_args() -> dict[str, Any]:
     return overlay
 
 
+# valid ipam roles
+VALID_IPAM_ROLES = {"access", "production"}
+
+# production vlan_range
+PRODUCTION_VLAN_RANGE = (400, 499)
+
+
 # Default object types for global search
 DEFAULT_SEARCH_TYPES = [
     "dcim.device",  # Most common search target
@@ -121,13 +128,11 @@ Some general netbox rules for vlan and prefix creation:
 - ech prefix has the scope site.
 - if the site you are creating a prefix has a tenant, set also the tenant of the site equal to the prefix
 - always ask the user to verify all settings before creating a prefix with vlan id, site and role
+- vlan names are derived from the desctipion and need to be not longer than 15 characters
 
 To create a new prefix the user will ask to create a new network with the following subnet mask e.g. /24 for a specific site.
 As a next step get the the correct site-summary.
 If you know the site-summary get the next free prefix with the specific subnet size
-
-
-
 """
 
 mcp = FastMCP("NetBox", instructions=INSTRUCTIONS)
@@ -705,6 +710,61 @@ def netbox_get_vlan_groups_for_site(
 
 @mcp.tool(
     description="""
+    Get all VLANs for a specific site by resolving the site's VLAN group.
+
+    Args:
+        site_slug: The slug of the site (e.g. "bonn")
+
+    Returns:
+        Dict with:
+          - count: Total number of VLANs
+          - vlan_group: The resolved VLAN group (id, name)
+          - results: List of VLANs with only id, vid, name
+    """,
+)
+def netbox_get_vlans_for_site(
+    site_slug: Annotated[str, Field(description="Site slug, e.g. 'bonn'")],
+) -> dict:
+    """
+    Get all VLANs for a specific site by resolving the site's VLAN group.
+    """
+    # Step 1: resolve site slug -> site id
+    site_response = netbox.get("dcim/sites", params={"slug": site_slug, "limit": 1})
+    site_results = site_response.get("results", [])
+    if not site_results:
+        raise ValueError(f"No site found with slug '{site_slug}'")
+    site_id = site_results[0]["id"]
+
+    # Step 2: fetch VLAN group scoped to this site
+    group_response = netbox.get(
+        "ipam/vlan-groups",
+        params={"scope_type": "dcim.site", "scope_id": site_id, "limit": 1},
+    )
+    group_results = group_response.get("results", [])
+    if not group_results:
+        raise ValueError(f"No VLAN group found for site '{site_slug}'")
+    vlan_group = group_results[0]
+
+    # Step 3: fetch all VLANs in this group, only id/vid/name
+    vlan_response = netbox.get(
+        "ipam/vlans",
+        params={
+            "group_id": vlan_group["id"],
+            "fields": "id,vid,name",
+            "limit": 1000,
+            "ordering": "vid",
+        },
+    )
+
+    return {
+        "count": vlan_response.get("count", 0),
+        "vlan_group": {"id": vlan_group["id"], "name": vlan_group["name"]},
+        "results": vlan_response.get("results", []),
+    }
+
+
+@mcp.tool(
+    description="""
     Check whether a VLAN ID already exists within a specific VLAN group.
 
     Args:
@@ -733,10 +793,6 @@ def netbox_check_vlan_id_in_group(
         "exists": len(results) > 0,
         "vlan": results[0] if results else None,
     }
-
-
-VALID_IPAM_ROLES = {"access", "production"}
-PRODUCTION_VLAN_RANGE = (400, 499)
 
 
 @mcp.tool(
