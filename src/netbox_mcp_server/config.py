@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     """Port to bind HTTP server (only used when transport='http')"""
 
     # ===== Security Settings =====
-    verify_ssl: bool = True
+    verify_ssl: bool = False
     """Whether to verify SSL certificates when connecting to NetBox"""
 
     # ===== Observability Settings =====

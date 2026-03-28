@@ -310,7 +310,32 @@ The server will be accessible at `http://localhost:8000/mcp` for MCP clients. Yo
 
 ## Development
 
-Contributions are welcome!  Please open an issue or submit a PR.
+Contributions are welcome! Please open an issue or submit a PR.
+
+### Setup
+
+After cloning the repository, install dependencies and activate the pre-commit hooks:
+
+```bash
+uv sync
+uv run pre-commit install
+```
+
+The pre-commit hooks run automatically on every `git commit`:
+
+| Hook | What it does |
+|------|-------------|
+| `ruff-check --fix` | Lints the code and auto-fixes where possible |
+| `ruff-format` | Formats the code (Black-compatible style) |
+| `pytest` | Runs the full test suite |
+
+If a hook fails, the commit is aborted. Fix the reported issues and commit again.
+
+To run the hooks manually without committing:
+
+```bash
+uv run pre-commit run --all-files
+```
 
 ## License
 

@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from netbox_mcp_server.netbox_client import NetBoxRestClient
+from netbox_mcp_server.client.netbox_client import NetBoxRestClient
 
 
 @pytest.fixture

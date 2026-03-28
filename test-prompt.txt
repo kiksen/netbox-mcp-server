@@ -1,6 +1,6 @@
 Hello,
 please create three new vlans for Bonn:
-/24 Office2
-/24 Voice2
+/28 PLC1
+/28 PLC2
 
 Thank you

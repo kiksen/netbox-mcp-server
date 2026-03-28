@@ -63,29 +63,14 @@ def test_settings_masks_secrets_in_summary():
 # ===== CLI Argument Parsing Tests =====
 
 
-def test_parse_cli_args_multiple():
-    """Test that multiple arguments are captured."""
+def test_parse_cli_args_log_level():
+    """Test that --log-level argument is captured."""
 
     original_argv = sys.argv
     try:
-        sys.argv = [
-            "server.py",
-            "--netbox-url",
-            "https://test.example.com/",
-            "--transport",
-            "http",
-            "--port",
-            "9000",
-            "--log-level",
-            "DEBUG",
-            "--no-verify-ssl",
-        ]
+        sys.argv = ["server.py", "--log-level", "DEBUG"]
         result = parse_cli_args()
-        assert result["netbox_url"] == "https://test.example.com/"
-        assert result["transport"] == "http"
-        assert result["port"] == 9000
         assert result["log_level"] == "DEBUG"
-        assert result["verify_ssl"] is False
     finally:
         sys.argv = original_argv
 

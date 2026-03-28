@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11,<3.15"
 dependencies = [
     "httpx>=0.28.1",
-    "fastmcp>=2.14.0,<3",
+    "fastmcp>=3.1.1",
     "requests>=2.31.0",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
@@ -69,6 +69,8 @@ select = [
 
 ignore = [
     "E501",  # Line too long, handled by formatter
+    "B008",  # Depends(...) as default argument is intentional FastMCP DI pattern
+    "N812",  # constants as CONST is a project-wide naming convention
 ]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.

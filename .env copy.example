@@ -15,8 +15,8 @@ HOST=127.0.0.1
 PORT=8000
 
 # ===== Security Settings =====
-# Set to false only for testing with self-signed certificates
-VERIFY_SSL=true
+# VERIFY_SSL=true   # enable for production with valid certificates
+VERIFY_SSL=false
 
 # ===== Logging Configuration =====
 # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL

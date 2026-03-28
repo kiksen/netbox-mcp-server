@@ -4,14 +4,17 @@ import sys
 from typing import Annotated, Any
 
 from fastmcp import FastMCP
+from fastmcp.dependencies import CurrentContext
+from fastmcp.server.lifespan import lifespan
 from pydantic import Field
 
-from netbox_mcp_server.adapter.netbox_adapter import NetboxAdapter
+from netbox_mcp_server import constants as CONST
+from netbox_mcp_server.client.netbox_client import NetBoxRestClient
 from netbox_mcp_server.config import Settings, configure_logging
-from netbox_mcp_server.netbox_client import NetBoxRestClient
+from netbox_mcp_server.depends import get_adapter
 from netbox_mcp_server.netbox_types import NETBOX_OBJECT_TYPES
 
-from . import constants as CONST
+logger = logging.getLogger(__name__)
 
 
 def parse_cli_args() -> dict[str, Any]:
@@ -26,52 +29,6 @@ def parse_cli_args() -> dict[str, Any]:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    # Core NetBox settings
-    parser.add_argument(
-        "--netbox-url",
-        type=str,
-        help="Base URL of the NetBox instance (e.g., https://netbox.example.com/)",
-    )
-    parser.add_argument(
-        "--netbox-token",
-        type=str,
-        help="API token for NetBox authentication",
-    )
-
-    # Transport settings
-    parser.add_argument(
-        "--transport",
-        type=str,
-        choices=["stdio", "http"],
-        help="MCP transport protocol (default: stdio)",
-    )
-    parser.add_argument(
-        "--host",
-        type=str,
-        help="Host address for HTTP server (default: 127.0.0.1)",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        help="Port for HTTP server (default: 8000)",
-    )
-
-    # Security settings
-    ssl_group = parser.add_mutually_exclusive_group()
-    ssl_group.add_argument(
-        "--verify-ssl",
-        action="store_true",
-        dest="verify_ssl",
-        default=None,
-        help="Verify SSL certificates (default)",
-    )
-    ssl_group.add_argument(
-        "--no-verify-ssl",
-        action="store_false",
-        dest="verify_ssl",
-        help="Disable SSL certificate verification (not recommended)",
-    )
-
     # Observability settings
     parser.add_argument(
         "--log-level",
@@ -83,26 +40,33 @@ def parse_cli_args() -> dict[str, Any]:
     args: argparse.Namespace = parser.parse_args()
 
     overlay: dict[str, Any] = {}
-    if args.netbox_url is not None:
-        overlay["netbox_url"] = args.netbox_url
-    if args.netbox_token is not None:
-        overlay["netbox_token"] = args.netbox_token
-    if args.transport is not None:
-        overlay["transport"] = args.transport
-    if args.host is not None:
-        overlay["host"] = args.host
-    if args.port is not None:
-        overlay["port"] = args.port
-    if args.verify_ssl is not None:
-        overlay["verify_ssl"] = args.verify_ssl
     if args.log_level is not None:
         overlay["log_level"] = args.log_level
 
     return overlay
 
 
-mcp = FastMCP("NetBox", instructions=CONST.INSTRUCTIONS)
-netbox = None
+settings: Settings | None = None
+
+
+# ck @asynccontextmanager
+@lifespan
+async def server_lifespan(server):
+    assert settings is not None, "settings must be initialized before server start"
+    try:
+        client = NetBoxRestClient(
+            url=str(settings.netbox_url),
+            token=settings.netbox_token.get_secret_value(),
+            verify_ssl=settings.verify_ssl,
+        )
+        logger.debug("NetBox client initialized successfully")
+        yield {"netbox": client}
+    except Exception as e:
+        logger.error(f"Failed to initialize NetBox client: {e}")
+        raise
+
+
+mcp = FastMCP("NetBox", instructions=CONST.INSTRUCTIONS, lifespan=server_lifespan)
 
 
 @mcp.tool(
@@ -173,6 +137,10 @@ netbox = None
 
     ENSURE YOU ARE AWARE THE RESULTS ARE PAGINATED BEFORE PROVIDING RESPONSE TO THE USER.
 
+    IMPORTANT: If the result contains multiple objects and the user needs to select one
+    to proceed (e.g. choosing a site, device, or prefix), present the options using the
+    AskUserQuestion tool before continuing.
+
     Valid object_type values:
 
     """
@@ -190,11 +158,12 @@ def netbox_get_objects(
     limit: Annotated[int, Field(default=5, ge=1, le=100)] = 5,
     offset: Annotated[int, Field(default=0, ge=0)] = 0,
     ordering: str | list[str] | None = None,
+    ctx=CurrentContext(),
 ):
     """
     Get objects from NetBox based on their type and filters
     """
-    nb = NetboxAdapter(netbox=netbox)
+    nb = get_adapter(ctx)
     return nb.get_objects(object_type, filters, fields, brief, limit, offset, ordering)
 
 
@@ -204,6 +173,7 @@ def netbox_get_object_by_id(
     object_id: int,
     fields: list[str] | None = None,
     brief: bool = False,
+    ctx=CurrentContext(),
 ):
     """
     Get detailed information about a specific NetBox object by its ID.
@@ -231,13 +201,12 @@ def netbox_get_object_by_id(
     Returns:
         Object dict (complete or with only requested fields based on fields parameter)
     """
-    nb = NetboxAdapter(netbox=netbox)
-
+    nb = get_adapter(ctx)
     return nb.get_object_by_id(object_type, object_id, fields, brief)
 
 
 @mcp.tool
-def netbox_get_changelogs(filters: dict):
+def netbox_get_changelogs(filters: dict, ctx=CurrentContext()):
     """
     Get object change records (changelogs) from NetBox based on filters.
 
@@ -292,7 +261,7 @@ def netbox_get_changelogs(filters: dict):
     - postchange_data: The object's data after the change (null for deletions)
     - time: The timestamp when the change was made
     """
-    nb = NetboxAdapter(netbox=netbox)
+    nb = get_adapter(ctx)
     return nb.get_changelogs(filters)
 
 
@@ -344,6 +313,10 @@ def netbox_get_changelogs(filters: dict):
             object_types=['dcim.site', 'dcim.location'],
             fields=['id', 'name', 'status']
         )
+
+    IMPORTANT: If the search returns multiple results and the user needs to select one
+    to proceed, present the matching objects as selectable options using the
+    AskUserQuestion tool before continuing.
     """
 )
 def netbox_search_objects(
@@ -351,14 +324,14 @@ def netbox_search_objects(
     object_types: list[str] | None = None,
     fields: list[str] | None = None,
     limit: Annotated[int, Field(default=5, ge=1, le=100)] = 5,
+    ctx=CurrentContext(),
 ) -> dict[str, list[dict]]:
     """
     Perform global search across NetBox infrastructure.
     """
-    search_types = object_types if object_types is not None else DEFAULT_SEARCH_TYPES
-
-    nb = NetboxAdapter(netbox=netbox)
-    return nb.search_objects(query, object_types, fields, limit)
+    nb = get_adapter(ctx)
+    search_types = object_types if object_types is not None else CONST.DEFAULT_SEARCH_TYPES
+    return nb.search_objects(query, search_types, fields, limit)
 
 
 @mcp.tool(
@@ -385,9 +358,9 @@ def netbox_get_next_available_prefix(
     prefix_length: Annotated[
         int, Field(description="Desired prefix length (1-128), e.g. 26 for /26")
     ],
+    ctx=CurrentContext(),
 ) -> dict:
-
-    nb = NetboxAdapter(netbox=netbox)
+    nb = get_adapter(ctx)
     return nb.get_next_available_prefix(parent_prefix, site, prefix_length)
 
 
@@ -412,22 +385,23 @@ def netbox_get_next_available_prefix(
             - next: URL to next page (or null)
             - previous: URL to previous page (or null)
             - results: List of prefix objects
+
+    IMPORTANT: If the result contains more than one prefix, present all of them
+    as selectable options using the AskUserQuestion tool before proceeding.
     """,
 )
 def netbox_get_site_summary_prefixes(
-    site: Annotated[
-        str, Field(description="Site name or slug, e.g. 'Berlin' or 'berlin'")
-    ],
+    site: Annotated[str, Field(description="Site name or slug, e.g. 'Berlin' or 'berlin'")],
     fields: list[str] | None = None,
     limit: Annotated[int, Field(default=100, ge=1, le=1000)] = 100,
     offset: Annotated[int, Field(default=0, ge=0)] = 0,
+    ctx=CurrentContext(),
 ) -> dict:
     """
     Get all prefixes with IPAM role 'site-summary' for a specific site.
     """
-    nb = NetboxAdapter(netbox=netbox)
-
-    return nb.get_site_summary_prefixes(site, fields)
+    nb = get_adapter(ctx)
+    return nb.get_site_summary_prefixes(site, fields, limit, offset)
 
 
 @mcp.tool(
@@ -446,16 +420,20 @@ def netbox_get_site_summary_prefixes(
             - next: URL to next page (or null)
             - previous: URL to previous page (or null)
             - results: List of VLAN group objects
+
+    IMPORTANT: If the result contains more than one VLAN group, present all of them
+    as selectable options using the AskUserQuestion tool before proceeding.
     """,
 )
 def netbox_get_vlan_groups_for_site(
     site_slug: Annotated[str, Field(description="Site slug, e.g. 'bonn'")],
     fields: list[str] | None = None,
+    ctx=CurrentContext(),
 ) -> dict[str, Any] | list[dict[str, Any]]:
     """
     Get all VLAN groups scoped to a specific site.
     """
-    nb = NetboxAdapter(netbox=netbox)
+    nb = get_adapter(ctx)
     return nb.get_vlan_groups_for_site(site_slug, fields)
 
 
@@ -475,12 +453,13 @@ def netbox_get_vlan_groups_for_site(
 )
 def netbox_get_vlans_for_site(
     site_slug: Annotated[str, Field(description="Site slug, e.g. 'bonn'")],
+    ctx=CurrentContext(),
 ) -> dict[str, Any] | list[dict[str, Any]]:
     """
     Get all VLANs for a specific site by resolving the site's VLAN group.
     """
-    nb = NetboxAdapter(netbox=netbox)
-    return nb.get_vlan_groups_for_site(site_slug)
+    nb = get_adapter(ctx)
+    return nb.get_vlans_for_site(site_slug)
 
 
 @mcp.tool(
@@ -500,11 +479,12 @@ def netbox_get_vlans_for_site(
 def netbox_check_vlan_id_in_vlan_group(
     vlan_group_id: Annotated[int, Field(description="Numeric ID of the VLAN group")],
     vid: Annotated[int, Field(description="VLAN ID to check (1-4094)", ge=1, le=4094)],
+    ctx=CurrentContext(),
 ) -> dict:
     """
     Check whether a VLAN ID already exists within a specific VLAN group.
     """
-    nb = NetboxAdapter(netbox=netbox)
+    nb = get_adapter(ctx)
     return nb.check_vlan_id_in_vlan_group(vlan_group_id, vid)
 
 
@@ -524,7 +504,8 @@ def netbox_check_vlan_id_in_vlan_group(
     - If a VLAN ID already exists in the site's VLAN group, its current name,
       description and associated prefixes are shown so the user can decide whether
       to overwrite.
-
+    - If a vlan description or a vlan name is already used, ask the user to decide wheather to overwrite.
+    
     Args:
         site_slug: Slug of the target site (e.g. "bonn")
         entries: List of planned entries, each with:
@@ -551,11 +532,12 @@ def netbox_review_vlan_prefix_plan(
             description="List of dicts with keys: vlan_id (int), prefix (str), role (str), description (str)"
         ),
     ],
+    ctx=CurrentContext(),
 ) -> dict:
     """
     Present a plan of VLANs and prefixes for user confirmation before creation.
     """
-    nb = NetboxAdapter(netbox=netbox)
+    nb = get_adapter(ctx)
     return nb.review_vlan_prefix_plan(site_slug, entries)
 
 
@@ -607,9 +589,7 @@ def netbox_create_vlan_prefix_batch(
     ],
     confirmed: Annotated[
         bool,
-        Field(
-            description="Must be True - only set after user has explicitly approved the plan"
-        ),
+        Field(description="Must be True - only set after user has explicitly approved the plan"),
     ],
     overwrite_existing_vlans: Annotated[
         bool,
@@ -617,32 +597,28 @@ def netbox_create_vlan_prefix_batch(
             description="If True, existing VLANs are reused and updated. Only set after user confirmed overwrite."
         ),
     ] = False,
+    ctx=CurrentContext(),
 ) -> dict:
     """
     Create VLANs and prefixes in NetBox after user confirmation.
     """
-    nb = NetboxAdapter(netbox=netbox)
-    return nb.create_vlan_prefix_batch(
-        site_slug, entries, confirmed, overwrite_existing_vlans
-    )
+    nb = get_adapter(ctx)
+    return nb.create_vlan_prefix_batch(site_slug, entries, confirmed, overwrite_existing_vlans)
 
 
 def main() -> None:
     """Main entry point for the MCP server."""
-    global netbox
+    global settings
 
     cli_overlay: dict[str, Any] = parse_cli_args()
 
     try:
         settings = Settings(**cli_overlay)
     except Exception as e:
-        print(
-            f"Configuration error: {e}", file=sys.stderr
-        )  # noqa: T201 - before logging configured
+        print(f"Configuration error: {e}", file=sys.stderr)
         sys.exit(1)
 
     configure_logging(settings.log_level)
-    logger = logging.getLogger(__name__)
 
     logger.info("Starting NetBox MCP Server")
     logger.info(f"Effective configuration: {settings.get_effective_config_summary()}")
@@ -657,7 +633,7 @@ def main() -> None:
         "0.0.0.0",
         "::",
         "[::]",
-    ]:  # noqa: S104 - checking, not binding
+    ]:
         logger.warning(
             f"HTTP transport is bound to {settings.host}:{settings.port}, which exposes the "
             "service to all network interfaces (IPv4/IPv6). This is insecure and should only be "
@@ -673,17 +649,6 @@ def main() -> None:
         )
 
     try:
-        netbox = NetBoxRestClient(
-            url=str(settings.netbox_url),
-            token=settings.netbox_token.get_secret_value(),
-            verify_ssl=settings.verify_ssl,
-        )
-        logger.debug("NetBox client initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize NetBox client: {e}")
-        sys.exit(1)
-
-    try:
         if settings.transport == "stdio":
             logger.info("Starting stdio transport")
             mcp.run(transport="stdio")
@@ -696,5 +661,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
     main()
