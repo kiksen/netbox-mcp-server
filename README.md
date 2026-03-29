@@ -1,11 +1,11 @@
 # NetBox MCP Server
 
-> **⚠️ Breaking Change in v1.0.0**: The project structure has changed.
-> If upgrading from v0.1.0, update your configuration:
-> - Change `uv run server.py` to `uv run netbox-mcp-server`
-> - Update Claude Desktop/Code configs to use `netbox-mcp-server` instead of `server.py`
+> **⚠️ This is my modified version of the NetBox MCP Server**: The project structure has changed.
+> - Upgraded to fastmcp 3.1.1
+> - Removed all command line parameters and added .env support to run it in an Azure Web App (link to envs)
 > - Docker users: rebuild images with updated CMD
-> - See [CHANGELOG.md](CHANGELOG.md) for full details
+> - Update Claude Desktop/Code configs to use `netbox-mcp-server` instead of `server.py`
+> - use`uv run netbox-mcp-server`
 
 This is a [Model Context Protocol](https://modelcontextprotocol.io/) server for NetBox.  It enables you to interact with your NetBox data directly via LLMs that support MCP — including querying infrastructure objects, searching across types, and creating VLANs and prefixes.
 
@@ -211,7 +211,25 @@ The server supports multiple configuration sources with the following precedence
 | `HOST` | String | `127.0.0.1` | If HTTP | Host address for HTTP server |
 | `PORT` | Integer | `8000` | If HTTP | Port for HTTP server |
 | `VERIFY_SSL` | Boolean | `false` | No | Whether to verify SSL certificates |
+| `MCP_TOKEN` | String | - | No | Bearer token to protect the HTTP endpoint (recommended when exposed beyond localhost) |
 | `LOG_LEVEL` | `DEBUG` \| `INFO` \| `WARNING` \| `ERROR` \| `CRITICAL` | `INFO` | No | Logging verbosity |
+
+### Startup Log
+
+At startup the server logs all configuration values so you can verify the correct settings are active — useful when deploying to Azure Web App or other cloud environments. Tokens are partially masked (first 3 characters visible):
+
+```
+2025-01-01 12:00:00 - netbox_mcp_server.server - INFO - Starting NetBox MCP Server
+2025-01-01 12:00:00 - netbox_mcp_server.server - INFO - Configuration:
+2025-01-01 12:00:00 - netbox_mcp_server.server - INFO -   NETBOX_URL      = https://netbox.example.com/
+2025-01-01 12:00:00 - netbox_mcp_server.server - INFO -   NETBOX_TOKEN    = c00****
+2025-01-01 12:00:00 - netbox_mcp_server.server - INFO -   TRANSPORT       = http
+2025-01-01 12:00:00 - netbox_mcp_server.server - INFO -   HOST            = 0.0.0.0
+2025-01-01 12:00:00 - netbox_mcp_server.server - INFO -   PORT            = 8000
+2025-01-01 12:00:00 - netbox_mcp_server.server - INFO -   VERIFY_SSL      = False
+2025-01-01 12:00:00 - netbox_mcp_server.server - INFO -   MCP_TOKEN       = abc****
+2025-01-01 12:00:00 - netbox_mcp_server.server - INFO -   LOG_LEVEL       = INFO
+```
 
 ### Transport Examples
 
@@ -240,12 +258,27 @@ For web-based MCP clients using HTTP/SSE transport:
 
 ```bash
 export NETBOX_URL=https://netbox.example.com/
-export NETBOX_TOKEN=<your-api-token>
+export NETBOX_TOKEN=<your-netbox-api-token>
 export TRANSPORT=http
 export HOST=127.0.0.1
 export PORT=8000
+export MCP_TOKEN=<your-mcp-bearer-token>   # protects the MCP endpoint
 
 uv run netbox-mcp-server
+```
+
+When `MCP_TOKEN` is set, all requests to the MCP endpoint must include the header:
+
+```
+Authorization: Bearer <your-mcp-bearer-token>
+```
+
+In Claude Code, pass the token when adding the server:
+
+```bash
+claude mcp add --transport http netbox \
+  --header "Authorization: Bearer <your-mcp-bearer-token>" \
+  http://127.0.0.1:8000/mcp
 ```
 
 ### Example .env File
@@ -263,6 +296,9 @@ TRANSPORT=stdio
 # HTTP Transport Settings (only used if TRANSPORT=http)
 # HOST=127.0.0.1
 # PORT=8000
+
+# MCP Endpoint Authentication (recommended when TRANSPORT=http and exposed beyond localhost)
+# MCP_TOKEN=your_mcp_bearer_token_here
 
 # Security (optional, defaults to false)
 VERIFY_SSL=false

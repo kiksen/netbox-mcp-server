@@ -4,6 +4,7 @@ from typing import Annotated, Any
 
 from fastmcp import Context, FastMCP
 from fastmcp.dependencies import CurrentContext
+from fastmcp.server.auth.auth import AccessToken, TokenVerifier
 from fastmcp.server.lifespan import lifespan
 from pydantic import Field
 
@@ -17,6 +18,19 @@ logger = logging.getLogger(__name__)
 
 
 settings: Settings | None = None
+
+
+class StaticBearerTokenVerifier(TokenVerifier):
+    """Verifies Bearer tokens against a single static token from configuration."""
+
+    def __init__(self, token: str) -> None:
+        super().__init__()
+        self._token = token
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        if token == self._token:
+            return AccessToken(token=token, client_id="mcp-client", scopes=[])
+        return None
 
 
 # ck @asynccontextmanager
@@ -589,8 +603,16 @@ def main() -> None:
 
     configure_logging(settings.log_level)
 
+    if settings.mcp_token:
+        mcp.auth = StaticBearerTokenVerifier(settings.mcp_token.get_secret_value())
+        logger.info("MCP Bearer token authentication enabled")
+    else:
+        logger.warning("MCP_TOKEN is not set — the HTTP endpoint is publicly accessible")
+
     logger.info("Starting NetBox MCP Server")
-    logger.info(f"Effective configuration: {settings.get_effective_config_summary()}")
+    logger.info("Configuration:")
+    for key, value in settings.get_effective_config_summary().items():
+        logger.info(f"  {key:<15} = {value}")
 
     if not settings.verify_ssl:
         logger.warning(

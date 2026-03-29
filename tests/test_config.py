@@ -54,7 +54,7 @@ def test_settings_masks_secrets_in_summary():
 
     summary = settings.get_effective_config_summary()
 
-    assert summary["netbox_token"] == "***REDACTED***"
+    assert summary["NETBOX_TOKEN"] == "sup****"
     assert "super-secret-token" not in str(summary)
 
 

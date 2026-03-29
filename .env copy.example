@@ -14,6 +14,11 @@ TRANSPORT=stdio
 HOST=127.0.0.1
 PORT=8000
 
+# ===== MCP Endpoint Authentication =====
+# Protects the HTTP endpoint with Bearer token auth (only used when TRANSPORT=http)
+# Strongly recommended when the server is exposed beyond localhost
+# MCP_TOKEN=your_mcp_bearer_token_here
+
 # ===== Security Settings =====
 # VERIFY_SSL=true   # enable for production with valid certificates
 VERIFY_SSL=false

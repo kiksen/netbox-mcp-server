@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     verify_ssl: bool = False
     """Whether to verify SSL certificates when connecting to NetBox"""
 
+    mcp_token: SecretStr | None = None
+    """Optional Bearer token to protect the MCP HTTP endpoint (only used when transport='http')"""
+
     # ===== Observability Settings =====
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     """Logging verbosity level"""
@@ -76,21 +79,32 @@ class Settings(BaseSettings):
         """No additional validation needed for HTTP transport; defaults are appropriate."""
         return self
 
+    @staticmethod
+    def _mask_token(secret: SecretStr | None) -> str:
+        """Return first 3 chars of token followed by ****, or 'not set'."""
+        if secret is None:
+            return "not set"
+        value = secret.get_secret_value()
+        if len(value) <= 3:
+            return "****"
+        return value[:3] + "****"
+
     def get_effective_config_summary(self) -> dict:
         """
         Return a non-secret summary of effective configuration for logging.
 
         Returns:
-            Dictionary with configuration values (secrets masked)
+            Dictionary with configuration values (secrets partially masked)
         """
         return {
-            "netbox_url": str(self.netbox_url),
-            "netbox_token": "***REDACTED***",
-            "transport": self.transport,
-            "host": self.host if self.transport == "http" else "N/A",
-            "port": self.port if self.transport == "http" else "N/A",
-            "verify_ssl": self.verify_ssl,
-            "log_level": self.log_level,
+            "NETBOX_URL": str(self.netbox_url),
+            "NETBOX_TOKEN": self._mask_token(self.netbox_token),
+            "TRANSPORT": self.transport,
+            "HOST": self.host if self.transport == "http" else "N/A",
+            "PORT": str(self.port) if self.transport == "http" else "N/A",
+            "VERIFY_SSL": str(self.verify_ssl),
+            "MCP_TOKEN": self._mask_token(self.mcp_token),
+            "LOG_LEVEL": self.log_level,
         }
 
 
