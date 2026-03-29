@@ -89,4 +89,7 @@ logs/
 # Git worktrees
 .worktrees/
 
+# MCP configuration (contains tokens)
+.mcp.json
+
 .plans/*

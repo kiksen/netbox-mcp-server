@@ -1,6 +1,0 @@
-Hello,
-please create two new vlans for Bonn:
-/28 PLC3
-/28 PLC3
-
-Thank you
