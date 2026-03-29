@@ -1,14 +1,12 @@
 """Tests for configuration management."""
 
 import logging
-import sys
 from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
 
 from netbox_mcp_server.config import Settings, configure_logging
-from netbox_mcp_server.server import parse_cli_args
 
 
 def test_settings_requires_netbox_url():
@@ -58,21 +56,6 @@ def test_settings_masks_secrets_in_summary():
 
     assert summary["netbox_token"] == "***REDACTED***"
     assert "super-secret-token" not in str(summary)
-
-
-# ===== CLI Argument Parsing Tests =====
-
-
-def test_parse_cli_args_log_level():
-    """Test that --log-level argument is captured."""
-
-    original_argv = sys.argv
-    try:
-        sys.argv = ["server.py", "--log-level", "DEBUG"]
-        result = parse_cli_args()
-        assert result["log_level"] == "DEBUG"
-    finally:
-        sys.argv = original_argv
 
 
 # ===== Logging Configuration Tests =====

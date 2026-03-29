@@ -1,4 +1,3 @@
-import argparse
 import logging
 import sys
 from typing import Annotated, Any
@@ -15,35 +14,6 @@ from netbox_mcp_server.depends import get_adapter
 from netbox_mcp_server.netbox_types import NETBOX_OBJECT_TYPES
 
 logger = logging.getLogger(__name__)
-
-
-def parse_cli_args() -> dict[str, Any]:
-    """
-    Parse command-line arguments for configuration overrides.
-
-    Returns:
-        dict of configuration overrides (only includes explicitly set values)
-    """
-    parser = argparse.ArgumentParser(
-        description="NetBox MCP Server - Model Context Protocol server for NetBox",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-
-    # Observability settings
-    parser.add_argument(
-        "--log-level",
-        type=str,
-        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        help="Logging verbosity level (default: INFO)",
-    )
-
-    args: argparse.Namespace = parser.parse_args()
-
-    overlay: dict[str, Any] = {}
-    if args.log_level is not None:
-        overlay["log_level"] = args.log_level
-
-    return overlay
 
 
 settings: Settings | None = None
@@ -611,10 +581,8 @@ def main() -> None:
     """Main entry point for the MCP server."""
     global settings
 
-    cli_overlay: dict[str, Any] = parse_cli_args()
-
     try:
-        settings = Settings(**cli_overlay)
+        settings = Settings()
     except Exception as e:
         print(f"Configuration error: {e}", file=sys.stderr)
         sys.exit(1)
