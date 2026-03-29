@@ -7,17 +7,32 @@
 > - Docker users: rebuild images with updated CMD
 > - See [CHANGELOG.md](CHANGELOG.md) for full details
 
-This is a simple read-only [Model Context Protocol](https://modelcontextprotocol.io/) server for NetBox.  It enables you to interact with your data in NetBox directly via LLMs that support MCP.
+This is a [Model Context Protocol](https://modelcontextprotocol.io/) server for NetBox.  It enables you to interact with your NetBox data directly via LLMs that support MCP — including querying infrastructure objects, searching across types, and creating VLANs and prefixes.
 
 ## Tools
 
+### Read / Query Tools
+
 | Tool | Description |
 |------|-------------|
-| get_objects | Retrieves NetBox core objects based on their type and filters |
-| get_object_by_id | Gets detailed information about a specific NetBox object by its ID |
-| get_changelogs | Retrieves change history records (audit trail) based on filters |
+| `netbox_get_objects` | Retrieves NetBox objects based on type and filters, with pagination and field projection |
+| `netbox_get_object_by_id` | Gets detailed information about a specific NetBox object by its ID |
+| `netbox_get_changelogs` | Retrieves change history records (audit trail) based on filters |
+| `netbox_search_objects` | Performs a global full-text search across multiple NetBox object types |
+| `netbox_get_site_summary_prefixes` | Returns all prefixes with IPAM role `site-summary` for a given site |
+| `netbox_get_next_available_prefix` | Finds the next free prefix of a given size within a container prefix |
+| `netbox_get_vlan_groups_for_site` | Lists all VLAN groups scoped to a specific site |
+| `netbox_get_vlans_for_site` | Returns all VLANs for a site, resolved via its VLAN group |
+| `netbox_check_vlan_id_in_vlan_group` | Checks whether a VLAN ID already exists in a given VLAN group |
 
-> Note: the set of supported object types is explicitly defined and limited to the core NetBox objects for now, and won't work with object types from plugins.
+### Write / Create Tools
+
+| Tool | Description |
+|------|-------------|
+| `netbox_review_vlan_prefix_plan` | Presents a plan of VLANs and prefixes for user confirmation before creation |
+| `netbox_create_vlan_prefix_batch` | Creates VLANs and associated prefixes in NetBox after explicit user confirmation |
+
+> Note: the set of supported object types is explicitly defined and limited to the core NetBox objects, and won't work with object types from plugins.
 
 ## Usage
 
@@ -126,6 +141,33 @@ Add the server configuration to your Claude Desktop config file. On Mac, edit `~
 > Show me all configuration changes to the core router in the last month
 ```
 
+#### Example: Creating VLANs and Prefixes
+
+The server supports creating VLANs and their associated prefixes via a two-step review-and-confirm workflow:
+
+```text
+Hello,
+please create two new vlans for Bonn:
+/28 PLC3
+/28 PLC4
+
+Thank you
+```
+
+The LLM will:
+1. Look up the site summary prefixes for Bonn to find the correct parent prefix
+2. Find the next two available `/28` subnets
+3. Determine the correct VLAN IDs and role
+4. Call `netbox_review_vlan_prefix_plan` to show you a summary table for review
+5. Only after your explicit confirmation call `netbox_create_vlan_prefix_batch` to create the VLANs and prefixes
+
+> **Rules enforced automatically:**
+> - Each prefix must have a role: `access` or `production`
+> - Production prefixes use VLAN IDs in the range 400–499
+> - VLAN names are derived from the description (max 15 characters)
+> - If the site has a tenant, it is automatically applied to both VLAN and prefix
+> - Duplicate VLAN IDs within the same VLAN group are detected and reported before creation
+
 ### Field Filtering (Token Optimization)
 
 Both `netbox_get_objects()` and `netbox_get_object_by_id()` support an optional `fields` parameter to reduce token usage:
@@ -155,10 +197,9 @@ The `fields` parameter uses NetBox's native field filtering. See the [NetBox API
 
 The server supports multiple configuration sources with the following precedence (highest to lowest):
 
-1. **Command-line arguments** (highest priority)
-2. **Environment variables**
-3. **`.env` file** in the project root
-4. **Default values** (lowest priority)
+1. **Environment variables** (highest priority)
+2. **`.env` file** in the project root
+3. **Default values** (lowest priority)
 
 ### Configuration Reference
 
@@ -169,7 +210,7 @@ The server supports multiple configuration sources with the following precedence
 | `TRANSPORT` | `stdio` \| `http` | `stdio` | No | MCP transport protocol |
 | `HOST` | String | `127.0.0.1` | If HTTP | Host address for HTTP server |
 | `PORT` | Integer | `8000` | If HTTP | Port for HTTP server |
-| `VERIFY_SSL` | Boolean | `true` | No | Whether to verify SSL certificates |
+| `VERIFY_SSL` | Boolean | `false` | No | Whether to verify SSL certificates |
 | `LOG_LEVEL` | `DEBUG` \| `INFO` \| `WARNING` \| `ERROR` \| `CRITICAL` | `INFO` | No | Logging verbosity |
 
 ### Transport Examples
@@ -198,7 +239,6 @@ For local Claude Desktop or Claude Code usage with stdio transport:
 For web-based MCP clients using HTTP/SSE transport:
 
 ```bash
-# Using environment variables
 export NETBOX_URL=https://netbox.example.com/
 export NETBOX_TOKEN=<your-api-token>
 export TRANSPORT=http
@@ -206,14 +246,6 @@ export HOST=127.0.0.1
 export PORT=8000
 
 uv run netbox-mcp-server
-
-# Or using CLI arguments
-uv run netbox-mcp-server \
-  --netbox-url https://netbox.example.com/ \
-  --netbox-token <your-api-token> \
-  --transport http \
-  --host 127.0.0.1 \
-  --port 8000
 ```
 
 ### Example .env File
@@ -232,8 +264,8 @@ TRANSPORT=stdio
 # HOST=127.0.0.1
 # PORT=8000
 
-# Security (optional, defaults to true)
-VERIFY_SSL=true
+# Security (optional, defaults to false)
+VERIFY_SSL=false
 
 # Logging (optional, defaults to INFO)
 LOG_LEVEL=INFO
@@ -241,15 +273,7 @@ LOG_LEVEL=INFO
 
 ### CLI Arguments
 
-All configuration options can be overridden via CLI arguments:
-
-```bash
-uv run netbox-mcp-server --help
-
-# Common examples:
-uv run netbox-mcp-server --log-level DEBUG --no-verify-ssl  # Development
-uv run netbox-mcp-server --transport http --port 9000       # Custom HTTP port
-```
+The server does not accept CLI arguments. All configuration is done via environment variables or the `.env` file.
 
 ## Docker Usage
 
