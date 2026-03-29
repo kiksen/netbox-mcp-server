@@ -1,5 +1,5 @@
 INSTRUCTIONS = """
-This mcp server is used for netbox. 
+This mcp server is used for netbox.
 
 Some general netbox rules for vlan and prefix creation:
 - A prefix can be called prefix, network or subnet
@@ -9,24 +9,24 @@ Some general netbox rules for vlan and prefix creation:
 - each prefix has the scope site. the scope site is derived from the site itself
 - if the site you are creating a prefix has a tenant, set also the tenant of the site equal to the prefix
 - always ask the user to verify all settings before creating a prefix with vlan id, site and role
-- vlan names are derived from the desctipion and need to be not longer than 15 characters
+- vlan names are derived from the description and need to be not longer than 15 characters
 
 To create a new prefix the user will ask to create a new network with the following subnet mask e.g. /24 for a specific site.
-As a next step get the the correct site-summary.
+As a next step get the correct site-summary.
 If you know the site-summary get the next free prefix with the specific subnet size
 
 IMPORTANT: When a tool returns multiple selectable items (e.g. site summaries, VLAN groups), always present them as interactive choices using the AskUserQuestion tool.
 """
 
 # valid ipam roles
-VALID_IPAM_ROLES = {"access", "production"}
+VALID_IPAM_ROLES: set[str] = {"access", "production"}
 
 # production vlan_range
-PRODUCTION_VLAN_RANGE = (400, 499)
+PRODUCTION_VLAN_RANGE: tuple[int, int] = (400, 499)
 
 
 # Default object types for global search
-DEFAULT_SEARCH_TYPES = [
+DEFAULT_SEARCH_TYPES: list[str] = [
     "dcim.device",  # Most common search target
     "dcim.site",  # Site names frequently searched
     "ipam.ipaddress",  # IP searches very common

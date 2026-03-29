@@ -8,7 +8,7 @@ This module provides a base class for NetBox client implementations and a REST A
 import abc
 from typing import Any
 
-import requests
+import requests  # type: ignore[import-untyped]
 
 
 class NetBoxClientBase(abc.ABC):

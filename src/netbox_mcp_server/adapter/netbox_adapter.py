@@ -1,6 +1,6 @@
 import ipaddress
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from pydantic import Field
 
@@ -14,7 +14,7 @@ from netbox_mcp_server.port.netbox_port import NetboxPort
 class NetboxAdapter(NetboxPort):
     netbox: NetBoxRestClient
 
-    def validate_filters(self, filters: dict) -> None:
+    def validate_filters(self, filters: dict[str, Any]) -> None:
         """
         Validate that filters don't use multi-hop relationship traversal.
 
@@ -75,7 +75,7 @@ class NetboxAdapter(NetboxPort):
     def get_objects(
         self,
         object_type: str,
-        filters: dict,
+        filters: dict[str, Any],
         fields: list[str] | None = None,
         brief: bool = False,
         limit: Annotated[int, Field(default=5, ge=1, le=100)] = 5,
@@ -159,7 +159,7 @@ class NetboxAdapter(NetboxPort):
         full_endpoint = f"{endpoint}/{object_id}"
         full_fallback = f"{fallback}/{object_id}" if fallback else None
 
-        params = {}
+        params: dict[str, Any] = {}
         if fields:
             params["fields"] = ",".join(fields)
 
@@ -168,7 +168,7 @@ class NetboxAdapter(NetboxPort):
 
         return self.netbox.get(full_endpoint, params=params, fallback_endpoint=full_fallback)
 
-    def get_changelogs(self, filters: dict):
+    def get_changelogs(self, filters: dict[str, Any]) -> dict[str, Any] | list[dict[str, Any]]:
         """
         Get object change records (changelogs) from NetBox based on filters.
 
@@ -237,7 +237,7 @@ class NetboxAdapter(NetboxPort):
         object_types: list[str] | None = None,
         fields: list[str] | None = None,
         limit: Annotated[int, Field(default=5, ge=1, le=100)] = 5,
-    ) -> dict[str, list[dict]]:
+    ) -> dict[str, list[dict[str, Any]]]:
         """
         Perform global search across NetBox infrastructure.
         """
@@ -251,7 +251,7 @@ class NetboxAdapter(NetboxPort):
                     f"Invalid object_type '{obj_type}'. Must be one of:\n{valid_types}"
                 )
 
-        results = {obj_type: [] for obj_type in search_types}
+        results: dict[str, list[dict[str, Any]]] = {obj_type: [] for obj_type in search_types}
 
         # Build results dictionary (error-resilient)
         for obj_type in search_types:
@@ -260,10 +260,13 @@ class NetboxAdapter(NetboxPort):
                 params: dict[str, Any] = {"q": query, "limit": limit}
                 if fields:
                     params["fields"] = ",".join(fields)
-                response = self.netbox.get(
-                    endpoint,
-                    params=params,
-                    fallback_endpoint=fallback,
+                response = cast(
+                    dict[str, Any],
+                    self.netbox.get(
+                        endpoint,
+                        params=params,
+                        fallback_endpoint=fallback,
+                    ),
                 )
                 # Extract results array from paginated response
                 results[obj_type] = response.get("results", [])
@@ -283,19 +286,22 @@ class NetboxAdapter(NetboxPort):
         prefix_length: Annotated[
             int, Field(description="Desired prefix length (1-128), e.g. 26 for /26")
         ],
-    ) -> dict:
+    ) -> dict[str, Any]:
         if not (1 <= prefix_length <= 128):
             raise ValueError(f"prefix_length must be between 1 and 128, got {prefix_length}")
 
         # Step 1: Find the container prefix
-        response = self.netbox.get(
-            "ipam/prefixes",
-            params={
-                "prefix": parent_prefix,
-                "site": site,
-                "status": "container",
-                "limit": 1,
-            },
+        response = cast(
+            dict[str, Any],
+            self.netbox.get(
+                "ipam/prefixes",
+                params={
+                    "prefix": parent_prefix,
+                    "site": site,
+                    "status": "container",
+                    "limit": 1,
+                },
+            ),
         )
         results = response.get("results", [])
         if not results:
@@ -314,7 +320,10 @@ class NetboxAdapter(NetboxPort):
             )
 
         # Step 3: Fetch available blocks from NetBox
-        available = self.netbox.get(f"ipam/prefixes/{container_id}/available-prefixes")
+        available = cast(
+            list[dict[str, Any]],
+            self.netbox.get(f"ipam/prefixes/{container_id}/available-prefixes"),
+        )
         if not available:
             raise ValueError(
                 f"No available prefixes in container '{parent_prefix}' at site '{site}'"
@@ -347,7 +356,7 @@ class NetboxAdapter(NetboxPort):
         fields: list[str] | None = None,
         limit: Annotated[int, Field(default=100, ge=1, le=1000)] = 100,
         offset: Annotated[int, Field(default=0, ge=0)] = 0,
-    ) -> dict:
+    ) -> dict[str, Any] | list[dict[str, Any]]:
         """
         Get all prefixes with IPAM role 'site-summary' for a specific site.
         """
@@ -372,7 +381,10 @@ class NetboxAdapter(NetboxPort):
         Get all VLAN groups scoped to a specific site.
         """
         # Step 1: resolve site slug -> site id
-        site_response = self.netbox.get("dcim/sites", params={"slug": site_slug, "limit": 1})
+        site_response = cast(
+            dict[str, Any],
+            self.netbox.get("dcim/sites", params={"slug": site_slug, "limit": 1}),
+        )
         site_results = site_response.get("results", [])
         if not site_results:
             raise ValueError(f"No site found with slug '{site_slug}'")
@@ -391,21 +403,27 @@ class NetboxAdapter(NetboxPort):
     def get_vlans_for_site(
         self,
         site_slug: Annotated[str, Field(description="Site slug, e.g. 'bonn'")],
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
         Get all VLANs for a specific site by resolving the site's VLAN group.
         """
         # Step 1: resolve site slug -> site id
-        site_response = self.netbox.get("dcim/sites", params={"slug": site_slug, "limit": 1})
+        site_response = cast(
+            dict[str, Any],
+            self.netbox.get("dcim/sites", params={"slug": site_slug, "limit": 1}),
+        )
         site_results = site_response.get("results", [])
         if not site_results:
             raise ValueError(f"No site found with slug '{site_slug}'")
         site_id = site_results[0]["id"]
 
         # Step 2: fetch VLAN group scoped to this site
-        group_response = self.netbox.get(
-            "ipam/vlan-groups",
-            params={"scope_type": "dcim.site", "scope_id": site_id, "limit": 1},
+        group_response = cast(
+            dict[str, Any],
+            self.netbox.get(
+                "ipam/vlan-groups",
+                params={"scope_type": "dcim.site", "scope_id": site_id, "limit": 1},
+            ),
         )
         group_results = group_response.get("results", [])
         if not group_results:
@@ -413,14 +431,17 @@ class NetboxAdapter(NetboxPort):
         vlan_group = group_results[0]
 
         # Step 3: fetch all VLANs in this group, only id/vid/name
-        vlan_response = self.netbox.get(
-            "ipam/vlans",
-            params={
-                "group_id": vlan_group["id"],
-                "fields": "id,vid,name",
-                "limit": 1000,
-                "ordering": "vid",
-            },
+        vlan_response = cast(
+            dict[str, Any],
+            self.netbox.get(
+                "ipam/vlans",
+                params={
+                    "group_id": vlan_group["id"],
+                    "fields": "id,vid,name",
+                    "limit": 1000,
+                    "ordering": "vid",
+                },
+            ),
         )
 
         total = vlan_response.get("count", 0)
@@ -444,13 +465,16 @@ class NetboxAdapter(NetboxPort):
         self,
         vlan_group_id: Annotated[int, Field(description="Numeric ID of the VLAN group")],
         vid: Annotated[int, Field(description="VLAN ID to check (1-4094)", ge=1, le=4094)],
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
         Check whether a VLAN ID already exists within a specific VLAN group.
         """
-        response = self.netbox.get(
-            "ipam/vlans",
-            params={"group_id": vlan_group_id, "vid": vid, "limit": 1},
+        response = cast(
+            dict[str, Any],
+            self.netbox.get(
+                "ipam/vlans",
+                params={"group_id": vlan_group_id, "vid": vid, "limit": 1},
+            ),
         )
         results = response.get("results", [])
         return {
@@ -462,24 +486,27 @@ class NetboxAdapter(NetboxPort):
         self,
         site_slug: Annotated[str, Field(description="Site slug, e.g. 'bonn'")],
         entries: Annotated[
-            list[dict],
+            list[dict[str, Any]],
             Field(
                 description="List of dicts with keys: vlan_id (int), prefix (str), role (str), description (str)"
             ),
         ],
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
         Present a plan of VLANs and prefixes for user confirmation before creation.
         """
         # Step 1: Resolve site
-        site_response = self.netbox.get("dcim/sites", params={"slug": site_slug, "limit": 1})
+        site_response = cast(
+            dict[str, Any],
+            self.netbox.get("dcim/sites", params={"slug": site_slug, "limit": 1}),
+        )
         site_results = site_response.get("results", [])
         if not site_results:
             raise ValueError(f"No site found with slug '{site_slug}'")
 
         site = site_results[0]
         site_id = site["id"]
-        site_info = {
+        site_info: dict[str, Any] = {
             "id": site_id,
             "name": site["name"],
             "slug": site["slug"],
@@ -487,9 +514,12 @@ class NetboxAdapter(NetboxPort):
         }
 
         # Step 2: Resolve VLAN group for site
-        vlan_group_response = self.netbox.get(
-            "ipam/vlan-groups",
-            params={"scope_type": "dcim.site", "scope_id": site_id, "limit": 1},
+        vlan_group_response = cast(
+            dict[str, Any],
+            self.netbox.get(
+                "ipam/vlan-groups",
+                params={"scope_type": "dcim.site", "scope_id": site_id, "limit": 1},
+            ),
         )
         vlan_group_results = vlan_group_response.get("results", [])
         vlan_group_id = vlan_group_results[0]["id"] if vlan_group_results else None
@@ -498,8 +528,8 @@ class NetboxAdapter(NetboxPort):
 
         # Step 3: Validate each entry and detect conflicts
         validation_errors: list[str] = []
-        conflicts: list[dict] = []
-        plan: list[dict] = []
+        conflicts: list[dict[str, Any]] = []
+        plan: list[dict[str, Any]] = []
 
         for i, entry in enumerate(entries):
             vlan_id = entry.get("vlan_id")
@@ -536,24 +566,30 @@ class NetboxAdapter(NetboxPort):
                     )
 
             # Check for existing VLAN conflict
-            existing_vlan = None
+            existing_vlan: dict[str, Any] | None = None
             if vlan_id is not None and vlan_group_id is not None:
-                existing_resp = self.netbox.get(
-                    "ipam/vlans",
-                    params={"group_id": vlan_group_id, "vid": vlan_id, "limit": 1},
+                existing_resp = cast(
+                    dict[str, Any],
+                    self.netbox.get(
+                        "ipam/vlans",
+                        params={"group_id": vlan_group_id, "vid": vlan_id, "limit": 1},
+                    ),
                 )
                 existing_results = existing_resp.get("results", [])
                 if existing_results:
                     ev = existing_results[0]
                     # Fetch existing prefixes linked to this VLAN
-                    existing_prefixes_resp = self.netbox.get(
-                        "ipam/prefixes",
-                        params={"vlan_id": ev["id"], "limit": 10},
+                    existing_prefixes_resp = cast(
+                        dict[str, Any],
+                        self.netbox.get(
+                            "ipam/prefixes",
+                            params={"vlan_id": ev["id"], "limit": 10},
+                        ),
                     )
                     existing_prefix_list = [
                         p["prefix"] for p in existing_prefixes_resp.get("results", [])
                     ]
-                    existing_vlan = {
+                    existing_vlan: dict[str, Any] = {
                         "id": ev["id"],
                         "vid": ev["vid"],
                         "name": ev.get("name", ""),
@@ -570,9 +606,16 @@ class NetboxAdapter(NetboxPort):
             # Check for duplicate description within the same VLAN group
             description_conflict = None
             if description and vlan_group_id is not None:
-                desc_resp = self.netbox.get(
-                    "ipam/vlans",
-                    params={"group_id": vlan_group_id, "description": description, "limit": 10},
+                desc_resp = cast(
+                    dict[str, Any],
+                    self.netbox.get(
+                        "ipam/vlans",
+                        params={
+                            "group_id": vlan_group_id,
+                            "description": description,
+                            "limit": 10,
+                        },
+                    ),
                 )
                 desc_results = desc_resp.get("results", [])
                 # Exclude the current VLAN ID (to avoid false positive when overwriting)
@@ -603,7 +646,7 @@ class NetboxAdapter(NetboxPort):
             )
 
         # Step 4: Build summary table
-        table_rows = []
+        table_rows: list[str] = []
         for entry in plan:
             conflict_marker = " ⚠" if entry["existing_vlan"] else ""
             table_rows.append(
@@ -621,7 +664,7 @@ class NetboxAdapter(NetboxPort):
         )
 
         if conflicts:
-            summary += "\n\n**⚠ Conflicts - diese VLANs existieren bereits:**\n"
+            summary += "\n\n**⚠ Conflicts - these VLANs already exist:**\n"
             for c in conflicts:
                 summary += (
                     f"- VLAN {c['vid']}: name=`{c['name']}`, "
@@ -629,17 +672,17 @@ class NetboxAdapter(NetboxPort):
                     f"prefixes={c['existing_prefixes'] or 'none'}\n"
                 )
             summary += (
-                "\nUm vorhandene VLANs zu überschreiben, `overwrite_existing_vlans=true` "
-                "in `netbox_create_vlan_prefix_batch` setzen."
+                "\nTo overwrite existing VLANs, set `overwrite_existing_vlans=true` "
+                "in `netbox_create_vlan_prefix_batch`."
             )
 
         if any(e.get("description_conflict") for e in plan):
-            summary += "\n\n**⚠ Description bereits vergeben:**\n"
+            summary += "\n\n**⚠ Description already in use:**\n"
             for e in plan:
                 dc = e.get("description_conflict")
                 if dc:
                     summary += (
-                        f"- Description '{e['description']}' bereits bei "
+                        f"- Description '{e['description']}' already used by "
                         f"VLAN {dc['vid']} (name=`{dc['name']}`)\n"
                     )
 
@@ -664,7 +707,7 @@ class NetboxAdapter(NetboxPort):
         self,
         site_slug: Annotated[str, Field(description="Site slug, e.g. 'bonn'")],
         entries: Annotated[
-            list[dict],
+            list[dict[str, Any]],
             Field(
                 description="List of dicts with keys: vlan_id (int), prefix (str), role (str), description (str), vlan_name (str, optional)"
             ),
@@ -681,7 +724,7 @@ class NetboxAdapter(NetboxPort):
                 description="If True, existing VLANs are reused and updated. Only set after user confirmed overwrite."
             ),
         ] = False,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """
         Create VLANs and prefixes in NetBox after user confirmation.
         """
@@ -693,7 +736,10 @@ class NetboxAdapter(NetboxPort):
             )
 
         # Step 1: Resolve site
-        site_response = self.netbox.get("dcim/sites", params={"slug": site_slug, "limit": 1})
+        site_response = cast(
+            dict[str, Any],
+            self.netbox.get("dcim/sites", params={"slug": site_slug, "limit": 1}),
+        )
         site_results = site_response.get("results", [])
         if not site_results:
             raise ValueError(f"No site found with slug '{site_slug}'")
@@ -702,9 +748,12 @@ class NetboxAdapter(NetboxPort):
         tenant_id = site.get("tenant", {}).get("id") if site.get("tenant") else None
 
         # Step 2: Resolve VLAN group for site
-        vlan_group_response = self.netbox.get(
-            "ipam/vlan-groups",
-            params={"scope_type": "dcim.site", "scope_id": site_id, "limit": 1},
+        vlan_group_response = cast(
+            dict[str, Any],
+            self.netbox.get(
+                "ipam/vlan-groups",
+                params={"scope_type": "dcim.site", "scope_id": site_id, "limit": 1},
+            ),
         )
         vlan_group_results = vlan_group_response.get("results", [])
         if not vlan_group_results:
@@ -715,7 +764,10 @@ class NetboxAdapter(NetboxPort):
         role_slugs = {entry["role"] for entry in entries if entry.get("role")}
         role_id_map: dict[str, int] = {}
         for slug in role_slugs:
-            role_response = self.netbox.get("ipam/roles", params={"slug": slug, "limit": 1})
+            role_response = cast(
+                dict[str, Any],
+                self.netbox.get("ipam/roles", params={"slug": slug, "limit": 1}),
+            )
             role_results = role_response.get("results", [])
             if not role_results:
                 raise ValueError(
@@ -759,9 +811,12 @@ class NetboxAdapter(NetboxPort):
                         continue
 
                 # Step 4: Check if VLAN already exists
-                existing_resp = self.netbox.get(
-                    "ipam/vlans",
-                    params={"group_id": vlan_group_id, "vid": vlan_id, "limit": 1},
+                existing_resp = cast(
+                    dict[str, Any],
+                    self.netbox.get(
+                        "ipam/vlans",
+                        params={"group_id": vlan_group_id, "vid": vlan_id, "limit": 1},
+                    ),
                 )
                 existing_vlans = existing_resp.get("results", [])
 

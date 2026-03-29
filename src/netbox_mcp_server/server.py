@@ -3,7 +3,7 @@ import logging
 import sys
 from typing import Annotated, Any
 
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 from fastmcp.dependencies import CurrentContext
 from fastmcp.server.lifespan import lifespan
 from pydantic import Field
@@ -52,7 +52,8 @@ settings: Settings | None = None
 # ck @asynccontextmanager
 @lifespan
 async def server_lifespan(server):
-    assert settings is not None, "settings must be initialized before server start"
+    if settings is None:
+        raise RuntimeError("settings must be initialized before server start")
     try:
         client = NetBoxRestClient(
             url=str(settings.netbox_url),
@@ -152,13 +153,13 @@ mcp = FastMCP("NetBox", instructions=CONST.INSTRUCTIONS, lifespan=server_lifespa
 )
 def netbox_get_objects(
     object_type: str,
-    filters: dict,
+    filters: dict[str, Any],
     fields: list[str] | None = None,
     brief: bool = False,
     limit: Annotated[int, Field(default=5, ge=1, le=100)] = 5,
     offset: Annotated[int, Field(default=0, ge=0)] = 0,
     ordering: str | list[str] | None = None,
-    ctx=CurrentContext(),
+    ctx: Context = CurrentContext(),
 ):
     """
     Get objects from NetBox based on their type and filters
@@ -173,7 +174,7 @@ def netbox_get_object_by_id(
     object_id: int,
     fields: list[str] | None = None,
     brief: bool = False,
-    ctx=CurrentContext(),
+    ctx: Context = CurrentContext(),
 ):
     """
     Get detailed information about a specific NetBox object by its ID.
@@ -206,7 +207,7 @@ def netbox_get_object_by_id(
 
 
 @mcp.tool
-def netbox_get_changelogs(filters: dict, ctx=CurrentContext()):
+def netbox_get_changelogs(filters: dict[str, Any], ctx: Context = CurrentContext()):
     """
     Get object change records (changelogs) from NetBox based on filters.
 
@@ -324,8 +325,8 @@ def netbox_search_objects(
     object_types: list[str] | None = None,
     fields: list[str] | None = None,
     limit: Annotated[int, Field(default=5, ge=1, le=100)] = 5,
-    ctx=CurrentContext(),
-) -> dict[str, list[dict]]:
+    ctx: Context = CurrentContext(),
+) -> dict[str, list[dict[str, Any]]]:
     """
     Perform global search across NetBox infrastructure.
     """
@@ -358,8 +359,8 @@ def netbox_get_next_available_prefix(
     prefix_length: Annotated[
         int, Field(description="Desired prefix length (1-128), e.g. 26 for /26")
     ],
-    ctx=CurrentContext(),
-) -> dict:
+    ctx: Context = CurrentContext(),
+) -> dict[str, Any]:
     nb = get_adapter(ctx)
     return nb.get_next_available_prefix(parent_prefix, site, prefix_length)
 
@@ -395,8 +396,8 @@ def netbox_get_site_summary_prefixes(
     fields: list[str] | None = None,
     limit: Annotated[int, Field(default=100, ge=1, le=1000)] = 100,
     offset: Annotated[int, Field(default=0, ge=0)] = 0,
-    ctx=CurrentContext(),
-) -> dict:
+    ctx: Context = CurrentContext(),
+) -> dict[str, Any] | list[dict[str, Any]]:
     """
     Get all prefixes with IPAM role 'site-summary' for a specific site.
     """
@@ -428,7 +429,7 @@ def netbox_get_site_summary_prefixes(
 def netbox_get_vlan_groups_for_site(
     site_slug: Annotated[str, Field(description="Site slug, e.g. 'bonn'")],
     fields: list[str] | None = None,
-    ctx=CurrentContext(),
+    ctx: Context = CurrentContext(),
 ) -> dict[str, Any] | list[dict[str, Any]]:
     """
     Get all VLAN groups scoped to a specific site.
@@ -453,8 +454,8 @@ def netbox_get_vlan_groups_for_site(
 )
 def netbox_get_vlans_for_site(
     site_slug: Annotated[str, Field(description="Site slug, e.g. 'bonn'")],
-    ctx=CurrentContext(),
-) -> dict[str, Any] | list[dict[str, Any]]:
+    ctx: Context = CurrentContext(),
+) -> dict[str, Any]:
     """
     Get all VLANs for a specific site by resolving the site's VLAN group.
     """
@@ -479,8 +480,8 @@ def netbox_get_vlans_for_site(
 def netbox_check_vlan_id_in_vlan_group(
     vlan_group_id: Annotated[int, Field(description="Numeric ID of the VLAN group")],
     vid: Annotated[int, Field(description="VLAN ID to check (1-4094)", ge=1, le=4094)],
-    ctx=CurrentContext(),
-) -> dict:
+    ctx: Context = CurrentContext(),
+) -> dict[str, Any]:
     """
     Check whether a VLAN ID already exists within a specific VLAN group.
     """
@@ -504,8 +505,8 @@ def netbox_check_vlan_id_in_vlan_group(
     - If a VLAN ID already exists in the site's VLAN group, its current name,
       description and associated prefixes are shown so the user can decide whether
       to overwrite.
-    - If a vlan description or a vlan name is already used, ask the user to decide wheather to overwrite.
-    
+    - If a vlan description or a vlan name is already used, ask the user to decide whether to overwrite.
+
     Args:
         site_slug: Slug of the target site (e.g. "bonn")
         entries: List of planned entries, each with:
@@ -527,13 +528,13 @@ def netbox_check_vlan_id_in_vlan_group(
 def netbox_review_vlan_prefix_plan(
     site_slug: Annotated[str, Field(description="Site slug, e.g. 'bonn'")],
     entries: Annotated[
-        list[dict],
+        list[dict[str, Any]],
         Field(
             description="List of dicts with keys: vlan_id (int), prefix (str), role (str), description (str)"
         ),
     ],
-    ctx=CurrentContext(),
-) -> dict:
+    ctx: Context = CurrentContext(),
+) -> dict[str, Any]:
     """
     Present a plan of VLANs and prefixes for user confirmation before creation.
     """
@@ -582,7 +583,7 @@ def netbox_review_vlan_prefix_plan(
 def netbox_create_vlan_prefix_batch(
     site_slug: Annotated[str, Field(description="Site slug, e.g. 'bonn'")],
     entries: Annotated[
-        list[dict],
+        list[dict[str, Any]],
         Field(
             description="List of dicts with keys: vlan_id (int), prefix (str), role (str), description (str), vlan_name (str, optional)"
         ),
@@ -597,8 +598,8 @@ def netbox_create_vlan_prefix_batch(
             description="If True, existing VLANs are reused and updated. Only set after user confirmed overwrite."
         ),
     ] = False,
-    ctx=CurrentContext(),
-) -> dict:
+    ctx: Context = CurrentContext(),
+) -> dict[str, Any]:
     """
     Create VLANs and prefixes in NetBox after user confirmation.
     """

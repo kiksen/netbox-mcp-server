@@ -71,6 +71,8 @@ ignore = [
     "E501",  # Line too long, handled by formatter
     "B008",  # Depends(...) as default argument is intentional FastMCP DI pattern
     "N812",  # constants as CONST is a project-wide naming convention
+    "S104",  # Binding to all interfaces is intentional for server deployment
+    "T201",  # print() is used for server output/logging
 ]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.

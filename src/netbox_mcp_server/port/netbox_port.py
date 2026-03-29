@@ -4,12 +4,12 @@ from pydantic import Field
 
 
 class NetboxPort(Protocol):
-    def validate_filters(self, filters: dict) -> None: ...
+    def validate_filters(self, filters: dict[str, Any]) -> None: ...
 
     def get_objects(
         self,
         object_type: str,
-        filters: dict,
+        filters: dict[str, Any],
         fields: list[str] | None = None,
         brief: bool = False,
         limit: Annotated[int, Field(default=5, ge=1, le=100)] = 5,
@@ -24,7 +24,7 @@ class NetboxPort(Protocol):
         brief: bool = False,
     ) -> dict[str, Any] | list[dict[str, Any]]: ...
 
-    def get_changelogs(self, filters: dict): ...
+    def get_changelogs(self, filters: dict[str, Any]) -> dict[str, Any] | list[dict[str, Any]]: ...
 
     def search_objects(
         self,
@@ -32,7 +32,7 @@ class NetboxPort(Protocol):
         object_types: list[str] | None = None,
         fields: list[str] | None = None,
         limit: Annotated[int, Field(default=5, ge=1, le=100)] = 5,
-    ) -> dict[str, list[dict]]: ...
+    ) -> dict[str, list[dict[str, Any]]]: ...
 
     def get_next_available_prefix(
         self,
@@ -43,7 +43,7 @@ class NetboxPort(Protocol):
         prefix_length: Annotated[
             int, Field(description="Desired prefix length (1-128), e.g. 26 for /26")
         ],
-    ) -> dict: ...
+    ) -> dict[str, Any]: ...
 
     def get_site_summary_prefixes(
         self,
@@ -51,7 +51,7 @@ class NetboxPort(Protocol):
         fields: list[str] | None = None,
         limit: Annotated[int, Field(default=100, ge=1, le=1000)] = 100,
         offset: Annotated[int, Field(default=0, ge=0)] = 0,
-    ) -> dict: ...
+    ) -> dict[str, Any] | list[dict[str, Any]]: ...
 
     def get_vlan_groups_for_site(
         self,
@@ -62,27 +62,30 @@ class NetboxPort(Protocol):
     def get_vlans_for_site(
         self,
         site_slug: Annotated[str, Field(description="Site slug, e.g. 'bonn'")],
-    ) -> dict: ...
+    ) -> dict[str, Any]: ...
+
     def check_vlan_id_in_vlan_group(
         self,
         vlan_group_id: Annotated[int, Field(description="Numeric ID of the VLAN group")],
         vid: Annotated[int, Field(description="VLAN ID to check (1-4094)", ge=1, le=4094)],
-    ) -> dict: ...
+    ) -> dict[str, Any]: ...
+
     def review_vlan_prefix_plan(
         self,
         site_slug: Annotated[str, Field(description="Site slug, e.g. 'bonn'")],
         entries: Annotated[
-            list[dict],
+            list[dict[str, Any]],
             Field(
                 description="List of dicts with keys: vlan_id (int), prefix (str), role (str), description (str)"
             ),
         ],
-    ) -> dict: ...
+    ) -> dict[str, Any]: ...
+
     def create_vlan_prefix_batch(
         self,
         site_slug: Annotated[str, Field(description="Site slug, e.g. 'bonn'")],
         entries: Annotated[
-            list[dict],
+            list[dict[str, Any]],
             Field(
                 description="List of dicts with keys: vlan_id (int), prefix (str), role (str), description (str), vlan_name (str, optional)"
             ),
@@ -99,6 +102,6 @@ class NetboxPort(Protocol):
                 description="If True, existing VLANs are reused and updated. Only set after user confirmed overwrite."
             ),
         ] = False,
-    ) -> dict: ...
+    ) -> dict[str, Any]: ...
 
     def _get_endpoint_info(self, object_type: str) -> tuple[str, str | None]: ...

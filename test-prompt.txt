@@ -1,6 +1,6 @@
 Hello,
-please create three new vlans for Bonn:
-/28 PLC1
-/28 PLC2
+please create two new vlans for Bonn:
+/28 PLC3
+/28 PLC3
 
 Thank you
